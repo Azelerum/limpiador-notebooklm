@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Elimina marcas de agua de NotebookLM y Gemini</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+    <div class="container">
+        <h1>Elimina marcas de agua de NotebookLM y Gemini</h1>
+        <p class="subtitle">Limpia tus PDFs y fotos de IA en segundos</p>
+
+        <div id="drop-zone" class="drop-zone">
+            <span class="drop-zone__prompt">Arrastra tu archivo (.pdf, .jpg, .png) aquí o haz clic para subir</span>
+            <input type="file" name="file" id="file-input" class="drop-zone__input" accept=".pdf,.png,.jpg,.jpeg">
+        </div>
+
+        <div id="process-section" class="hidden">
+            <button id="process-btn" class="btn">Eliminar marcas de agua</button>
+            <div id="status-msg"></div>
+        </div>
+
+        <div id="download-section" class="hidden">
+            <a id="download-link" href="#" class="btn btn-download">Descargar archivo limpio</a>
+            <button id="reset-btn" class="btn btn-secondary">Subir otro</button>
+        </div>
+
+        <div id="loader" class="loader hidden"></div>
+    </div>
+    <script src="app.js"></script>
+</body>
+
+</html>

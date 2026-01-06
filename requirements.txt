@@ -1,0 +1,5 @@
+python-pptx
+Flask
+pymupdf
+opencv-python-headless
+numpy
