@@ -4,6 +4,7 @@ Una herramienta web premium para eliminar las marcas de agua de tus documentos (
 
 He hecho una versión gratuita para que todo el mundo pueda usarla, pero si quieres que todo el mundo pueda usarla, puedes desplegarla en la nube (GitHub + Render).
 
+Modifica jacobo
 
 ## Características
 - **Eliminación inteligente en PDFs**: Detecta y oculta el texto "NotebookLM" en cualquier fondo.
