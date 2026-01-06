@@ -2,6 +2,9 @@
 
 Una herramienta web premium para eliminar las marcas de agua de tus documentos (NotebookLM) y fotos generadas por IA (Bard, Gemini) de forma automática y fluida.
 
+He hecho una versión gratuita para que todo el mundo pueda usarla, pero si quieres que todo el mundo pueda usarla, puedes desplegarla en la nube (GitHub + Render).
+
+
 ## Características
 - **Eliminación inteligente en PDFs**: Detecta y oculta el texto "NotebookLM" en cualquier fondo.
 - **Limpieza de Fotos IA**: Elimina el logo de destello (sparkle) de las fotos de Gemini usando tecnología de "inpainting".
