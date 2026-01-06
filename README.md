@@ -7,6 +7,7 @@ He hecho una versión gratuita para que todo el mundo pueda usarla, pero si quie
 Modifica jacobo
 
 ## Características
+
 - **Eliminación inteligente en PDFs**: Detecta y oculta el texto "NotebookLM" en cualquier fondo.
 - **Limpieza de Fotos IA**: Elimina el logo de destello (sparkle) de las fotos de Gemini usando tecnología de "inpainting".
 - **Mezcla perfecta**: Reconstruye las zonas borradas basándose en los píxeles circundantes.
@@ -16,17 +17,23 @@ Modifica jacobo
 
 1. **Clonar/Descargar** este repositorio.
 2. **Instalar dependencias**:
+
    ```bash
    python3 -m pip install -r requirements.txt
    ```
+
 3. **Lanzar el servidor**:
+
    ```bash
    python3 execution/web_app_server.py
    ```
+
 4. **Abrir en el navegador**:
+
    [http://localhost:5001](http://localhost:5001)
 
 ## Estructura del Proyecto (Arquitectura de 3 Capas)
+
 - `directives/`: Instrucciones de alto nivel sobre el funcionamiento de la app.
 - `execution/`: Scripts de procesamiento (Python) y servidor Flask.
 - `web/`: Archivos frontend (HTML, CSS, JS).
