@@ -95,12 +95,14 @@ def remove_gemini_watermark(input_path, output_path):
         
         print(f"Best Ensemble Result: Scale: {best_scale:.2f}, Score: {best_score:.4f}")
         
+
         # 3. Create Mask
         mask = np.zeros((height, width), dtype=np.uint8)
         
         # Threshold for detection confidence
-        # lower threshold allowed if we have good shape match
         detection_threshold = 0.38 
+        
+        inpainting_radius = 3 # Default
         
         if best_score > detection_threshold:
             # Match found! 
@@ -118,37 +120,51 @@ def remove_gemini_watermark(input_path, output_path):
             
             mask[global_y:global_y+h_place, global_x:global_x+w_place] = resized_template_mask[0:h_place, 0:w_place]
             
-            # Dilate
-            kernel_size = 3 if best_scale < 1.0 else 5
-            kernel = np.ones((kernel_size, kernel_size), np.uint8)
+            # AGGRESSIVE DILATION logic for high confidence matches
+            # The watermark often has a "glow" that the template misses.
+            # If we are sure it's the watermark, we kill it with fire.
+            if best_score > 0.8:
+                print("High confidence match. Using Aggressive Removal.")
+                kernel = np.ones((5, 5), np.uint8)
+                iterations = 5
+                inpainting_radius = 7
+            else:
+                kernel_size = 3 if best_scale < 1.0 else 5
+                kernel = np.ones((kernel_size, kernel_size), np.uint8)
+                iterations = 2
+                inpainting_radius = 3
+
             mask_roi_view = mask[global_y:global_y+h_place, global_x:global_x+w_place]
-            dilated = cv2.dilate(mask_roi_view, kernel, iterations=2)
+            dilated = cv2.dilate(mask_roi_view, kernel, iterations=iterations)
             mask[global_y:global_y+h_place, global_x:global_x+w_place] = dilated
             
             print("Watermark detected via Template Matching.")
             
         else:
-            # FALLBACK: Bright Spot Detection
-            print("Template matching weak. Trying Bright Spot Fallback...")
+            # FALLBACK: Feature-Based Detection (Top-Hat)
+            # Works on light or dark backgrounds by detecting local contrast (sparkles).
+            print("Template matching weak. Trying Top-Hat Fallback...")
             
-            # Threshold the ROI to find bright spots (Gemini sparkles are usually white/bright)
-            # Use a high threshold
-            _, binary_roi = cv2.threshold(gray_roi, 230, 255, cv2.THRESH_BINARY)
+            # Top-Hat Transform basically subtracts the opened image from the original.
+            # It isolates small bright elements.
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 15))
+            tophat = cv2.morphologyEx(gray_roi, cv2.MORPH_TOPHAT, kernel)
+            
+            # Threshold the Top-Hat result
+            # Bright sparkles will have high values in tophat
+            _, binary_roi = cv2.threshold(tophat, 200, 255, cv2.THRESH_BINARY)
             
             # Filter noise
-            kernel = np.ones((3,3), np.uint8)
-            binary_roi = cv2.morphologyEx(binary_roi, cv2.MORPH_OPEN, kernel, iterations=1)
+            kernel_noise = np.ones((3,3), np.uint8)
+            binary_roi = cv2.morphologyEx(binary_roi, cv2.MORPH_OPEN, kernel_noise, iterations=1)
             
             # Find contours
             contours, _ = cv2.findContours(binary_roi, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             
-            # Look for contours that might be the watermark (near center of ROI usually, but could be anywhere in bottom right)
             found_spot = False
             for cnt in contours:
                 area = cv2.contourArea(cnt)
-                if 10 < area < 2000: # Reasonable size for a sparkle
-                    # Draw this contour on the global mask
-                    # Need to shift coordinates
+                if 5 < area < 2000: # Reasonable size for a sparkle
                     cnt_shifted = cnt + np.array([x1, y1])
                     cv2.drawContours(mask, [cnt_shifted], -1, 255, -1)
                     found_spot = True
@@ -156,18 +172,19 @@ def remove_gemini_watermark(input_path, output_path):
             if found_spot:
                  # Dilate the fallback mask to be safe
                 kernel = np.ones((5,5), np.uint8)
-                mask = cv2.dilate(mask, kernel, iterations=2)
-                print("Watermark detected via Bright Spot Fallback.")
+                mask = cv2.dilate(mask, kernel, iterations=3)
+                print("Watermark detected via Top-Hat Fallback.")
             else:
-                # Last resort: Box
-                print("WARNING: No watermark detected. Using Safety Box.")
-                box_size = 70
-                box_x = width - 80
-                box_y = height - 80
+                # Last resort: Safety Box (Expanded)
+                print("WARNING: No watermark detected. Using Expanded Safety Box.")
+                box_size = 100 # Increased from 70
+                box_x = width - 110
+                box_y = height - 110
                 cv2.rectangle(mask, (box_x, box_y), (box_x + box_size, box_y + box_size), 255, -1)
+                inpainting_radius = 5
 
         # 4. Inpaint
-        result = cv2.inpaint(img, mask, 3, cv2.INPAINT_TELEA)
+        result = cv2.inpaint(img, mask, inpainting_radius, cv2.INPAINT_TELEA)
 
         # Save
         cv2.imwrite(output_path, result)
