@@ -36,22 +36,42 @@ def remove_gemini_watermark(input_path, output_path):
         # Convert to gray
         gray_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
         
-        # We look for bright pixels. The analysis showed max brightness ~207.
-        # So we set a safe threshold of 160 to catch the glow and the core.
-        _, mask_roi = cv2.threshold(gray_roi, 160, 255, cv2.THRESH_BINARY)
+        # Analyze brightness distribution in the ROI
+        # If the image is very bright, a fixed threshold of 160 selects the background too.
+        # We use a dynamic threshold based on the 96th percentile of brightness.
+        # This helps isolate the "extra bright" watermark from a bright background.
+        p96 = np.percentile(gray_roi, 96)
         
+        # Base threshold is 160 (determined experimentally)
+        # If p96 is high (e.g. > 170), the image is bright, so we raise the threshold.
+        # We cap the threshold at 250 to ensure we catch *something* if it's super bright.
+        if p96 > 170:
+            threshold_val = min(p96 - 2, 250)
+            print(f"Bright background detected. Using dynamic threshold: {threshold_val}")
+        else:
+            threshold_val = 160
+            print(f"Normal background. Using fixed threshold: {threshold_val}")
+
+        _, mask_roi = cv2.threshold(gray_roi, threshold_val, 255, cv2.THRESH_BINARY)
+        
+        # Filter noise: The sparkle is a connected component, not single specks.
+        # Use Open (Erode -> Dilate) to remove small noise.
+        kernel_noise = np.ones((2,2), np.uint8)
+        mask_roi = cv2.morphologyEx(mask_roi, cv2.MORPH_OPEN, kernel_noise)
+
         # Dilate to cover edges/glow
-        kernel = np.ones((3,3), np.uint8) # Smaller kernel for finer control
-        mask_roi = cv2.dilate(mask_roi, kernel, iterations=2)
+        # We dilate a bit more if we used a high threshold, as we likely only caught the core.
+        iterations = 3 if threshold_val > 200 else 2
+        kernel = np.ones((3,3), np.uint8)
+        mask_roi = cv2.dilate(mask_roi, kernel, iterations=iterations)
         
         # 4. Fallback Logic (CRITICAL)
-        # If the mask is effectively empty (e.g. image is too dark or logo is blended),
-        # we MUST force a removal in the known location.
-        # Analysis showed the logo is about 50x50 pixels in a 1024 image (~5% of size).
-        if cv2.countNonZero(mask_roi) < 50:
+        # If the mask is too small or empty (watermark wasn't brighter than background),
+        # force a removal in the known location.
+        if cv2.countNonZero(mask_roi) < 30: # Reduced from 50 as we are more selective now
+            print("Watermark not detected by brightness. Using fallback box.")
             # Create a box mask in the expected location (bottom-right centered in ROI)
             # The logo is usually ~40-60px from the corner.
-            # We'll make a 60x60 box to be safe.
             box_size = 70
             offset = 10
             cv2.rectangle(mask_roi, 
