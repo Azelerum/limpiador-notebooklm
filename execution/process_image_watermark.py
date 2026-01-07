@@ -36,28 +36,47 @@ def remove_gemini_watermark(input_path, output_path):
         # Convert to gray
         gray_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
         
-        # Analyze brightness distribution in the ROI
-        # If the image is very bright, a fixed threshold of 160 selects the background too.
-        # We use a dynamic threshold based on the 96th percentile of brightness.
-        # This helps isolate the "extra bright" watermark from a bright background.
+        # Analyze brightness distribution
         p96 = np.percentile(gray_roi, 96)
         
-        # Base threshold is 160 (determined experimentally)
-        # If p96 is high (e.g. > 170), the image is bright, so we raise the threshold.
-        # We cap the threshold at 250 to ensure we catch *something* if it's super bright.
+        # Initial threshold guess
         if p96 > 170:
             threshold_val = min(p96 - 2, 250)
-            print(f"Bright background detected. Using dynamic threshold: {threshold_val}")
+            print(f"Bright background. Initial threshold: {threshold_val}")
         else:
             threshold_val = 160
-            print(f"Normal background. Using fixed threshold: {threshold_val}")
+            print(f"Normal background. Initial threshold: {threshold_val}")
 
-        _, mask_roi = cv2.threshold(gray_roi, threshold_val, 255, cv2.THRESH_BINARY)
+        # Iterative "Soft-Squeeze" Logic
+        # We want the mask to be small (only the logo). 
+        # If it's too big, we are selecting background. We squeeze (increase threshold) until it fits.
         
-        # Filter noise: The sparkle is a connected component, not single specks.
-        # Use Open (Erode -> Dilate) to remove small noise.
-        kernel_noise = np.ones((2,2), np.uint8)
-        mask_roi = cv2.morphologyEx(mask_roi, cv2.MORPH_OPEN, kernel_noise)
+        roi_area = roi.shape[0] * roi.shape[1]
+        max_allowed_area = int(roi_area * 0.025) # Max 2.5% of the corner (approx 2000px in 1024w)
+        
+        mask_roi = None
+        
+        # Loop to find the sweet spot
+        for t in range(int(threshold_val), 256, 1):
+             _, temp_mask = cv2.threshold(gray_roi, t, 255, cv2.THRESH_BINARY)
+             
+             # Basic noise filter
+             kernel_noise = np.ones((2,2), np.uint8)
+             temp_mask = cv2.morphologyEx(temp_mask, cv2.MORPH_OPEN, kernel_noise)
+             
+             count = cv2.countNonZero(temp_mask)
+             
+             if count <= max_allowed_area:
+                 # Found a good threshold!
+                 mask_roi = temp_mask
+                 print(f"Locked threshold at {t} (Area: {count}px / {roi_area}px)")
+                 break
+        
+        # Failsafe: If we exhausted the loop and mask is still None (shouldn't happen unless image is pure white)
+        # or if we went to 255 and it was still too big (impossible for binary threshold except all 255)
+        if mask_roi is None:
+             # Just take what we have at 255 or empty
+             mask_roi = np.zeros_like(gray_roi)
 
         # Dilate to cover edges/glow
         # We dilate a bit more if we used a high threshold, as we likely only caught the core.
