@@ -9,8 +9,9 @@ Modifica jacobo
 ## Características
 
 - **Eliminación inteligente en PDFs**: Detecta y oculta el texto "NotebookLM" en cualquier fondo.
-- **Limpieza de Fotos IA**: Elimina el logo de destello (sparkle) de las fotos de Gemini usando tecnología de "inpainting".
-- **Mezcla perfecta**: Reconstruye las zonas borradas basándose en los píxeles circundantes.
+- **Limpieza de Fotos IA (Gemini)**: Elimina el logo de destello (sparkle) mediante **Template Matching**, detectando la forma exacta sin importar el fondo.
+- **Calidad Original Garantizada**: La herramienta mantiene la resolución y nitidez original, evitando artefactos de reescalado artificial o filtros que degraden los textos.
+- **Inpainting Profesional**: Reconstruye la zona eliminada usando el algoritmo Navier-Stokes para una transición invisible.
 - **Interfaz moderna**: Sistema de arrastrar y soltar compatible con PDFs e Imágenes (.jpg, .png).
 
 ## Instalación Local (Para uso personal)

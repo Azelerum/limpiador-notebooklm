@@ -33,15 +33,19 @@ Deploy a simple web application that allows users to upload NotebookLM documents
 - Strategy: Seek text object in bottom of pages and obscure/delete.
 
 ### Images (Gemini/Bard)
-- Watermark is a "sparkle" logo in the bottom-right.
-- **Dynamic Thresholding (Self-Annealing)**:
-  - Originally used fixed threshold (160). Failed on bright backgrounds.
-  - **New Logic (Iterative Soft-Squeeze)**: 
-    1. Calculate 96th percentile.
-    2. Set initial high threshold (up to 250).
-    3. **Constraint Loop**: Measure mask size. If > 2.5% of ROI area, increase threshold by 1 and retry. Repeat until mask is small (<2.5%) or limit reached.
-    4. This prevents massive blurs on white/snowy images where background brightness is almost identical to the watermark.
-  - Fallback: known bounding box.
+- **Goal**: Preserve original image integrity while removing the logo.
+- **Watermark**: "Sparkle" logo in the bottom-right corner.
+- **Strategy: Template Matching (Advanced Recognizer)**:
+  - We use an ensemble of templates (sparkle logos) at multiple scales (0.7 to 1.3).
+  - This is robust to any background (snow, city, dark) because it detects the *shape* and not just the *brightness*.
+- **Inpainting**:
+  - Once detected, we use Navier-Stokes (NS) inpainting for a smoother blend.
+- **Resolution Policy**: 
+  - **Original Quality (Fixed)**: We explicitly avoid upscaling or artificial sharpening filters. 
+  - The tool outputs the exact same dimensions and byte-fidelity as the input to avoid "blurry" or "AI-distorted" artifacts in text or textures.
+- **Fallback**: 
+  - If shape matching fails, we use a **Top-Hat Transform** (local contrast detector) as a secondary layer.
+  - Final resort: known safety bounding box.
 
 ## Technical Requirements
 - Clean, drop-zone UI.

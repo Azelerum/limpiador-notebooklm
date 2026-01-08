@@ -58,7 +58,8 @@ h1 {
     position: relative;
 }
 
-.drop-zone:hover, .drop-zone--over {
+.drop-zone:hover,
+.drop-zone--over {
     border-color: var(--primary);
     background-color: #f1f5f9;
 }
@@ -121,6 +122,11 @@ h1 {
 }
 
 @keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
+    0% {
+        transform: rotate(0deg);
+    }
+
+    100% {
+        transform: rotate(360deg);
+    }
 }

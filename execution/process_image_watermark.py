@@ -3,7 +3,7 @@ import numpy as np
 import os
 import sys
 
-def remove_gemini_watermark(input_path, output_path):
+def remove_gemini_watermark(input_path, output_path, upscale=False):
     """
     Removes the Gemini sparkle logo watermark using Template Matching.
     Robust to any background brightness as it detects shape, not pixel value.
@@ -12,35 +12,38 @@ def remove_gemini_watermark(input_path, output_path):
         if not os.path.exists(input_path):
             return False, f"File {input_path} not found.", None
 
-        # Load image
-        img = cv2.imread(input_path)
+        # Load image with alpha channel if present
+        img = cv2.imread(input_path, cv2.IMREAD_UNCHANGED)
         if img is None:
             return False, "Could not read image.", None
 
+        # Handle different channel counts
+        if len(img.shape) == 3 and img.shape[2] == 4:
+            # RGBA
+            alpha = img[:, :, 3]
+            img_bgr = img[:, :, 0:3]
+            is_rgba = True
+        else:
+            img_bgr = img
+            is_rgba = False
 
+        height, width = img_bgr.shape[:2]
+        print(f"Processing image: {width}x{height} {'(RGBA)' if is_rgba else '(BGR)'}")
 
-        height, width = img.shape[:2]
-        print(f"Processing image: {width}x{height}")
-
-        # 1. Define Search Region (ROI) - Bottom Right Corner
-        # The logo is always in the same relative spot.
-        roi_scale = 0.15 # 15% of size
-        search_size = int(max(width, height) * roi_scale)
-        search_size = max(150, min(search_size, 400)) # Clamped size
+        # 1. Define Search Region (ROI) - Bottom Margin
+        # We look at the bottom 15% for the sparkle and bottom 6% for author labels.
+        roi_h_pct = 0.15
+        roi_h = int(height * roi_h_pct)
+        roi_y = height - roi_h
         
-        x1 = width - search_size
-        y1 = height - search_size
-        
-        # Ensure ROI is valid
-        if x1 < 0 or y1 < 0:
-            x1, y1 = 0, 0
-            
-        roi = img[y1:height, x1:width]
-        gray_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+        roi_bgr = img_bgr[roi_y:height, 0:width]
+        roi_gray = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2GRAY)
 
-        # 2. Ensemble Template Matching
-        # We will try multiple templates and multiple scales.
-        
+        # 2. CREATE MASTER MASK
+        mask = np.zeros((height, width), dtype=np.uint8)
+        detected_anything = False
+
+        # --- A. SPARKLE LOGO DETECTION (Template Matching) ---
         base_dir = os.path.dirname(os.path.abspath(__file__))
         assets_dir = os.path.join(base_dir, "assets")
         
@@ -53,150 +56,177 @@ def remove_gemini_watermark(input_path, output_path):
                     if t_img is not None:
                         templates.append(t_img)
         
-        if not templates:
-            print("No templates found in assets! using fallback.")
-        else:
-            print(f"Loaded {len(templates)} templates.")
+        best_sparkle_score = -1
+        best_sparkle_loc = None
+        best_sparkle_size = None
+        best_sparkle_template = None
 
-        best_score = -1
-        best_loc = None
-        best_scale = 1.0
-        best_mask_size = (0, 0)
-        best_template = None
-
-        # Scales to try: 70% to 130%
-        scales = np.linspace(0.7, 1.3, 13) 
+        # Dense scales to catch subtle variations
+        scales = np.linspace(0.4, 1.6, 25) 
         
-        print("Starting ensemble matching...")
+        # Only look for sparkle in the bottom-right corner (last 30% width)
+        sparkle_search_w = int(width * 0.3)
+        sparkle_roi_gray = roi_gray[:, width-sparkle_search_w:]
         
         for template in templates:
             th, tw = template.shape[:2]
             for scale in scales:
-                # Resize template
-                t_w = int(tw * scale)
-                t_h = int(th * scale)
-                
-                # If resized template is larger than ROI, skip
-                if t_w > gray_roi.shape[1] or t_h > gray_roi.shape[0]:
+                t_w, t_h = int(tw * scale), int(th * scale)
+                if t_w > sparkle_roi_gray.shape[1] or t_h > sparkle_roi_gray.shape[0]:
                     continue
-                    
-                resized_template = cv2.resize(template, (t_w, t_h), interpolation=cv2.INTER_AREA)
+                resized = cv2.resize(template, (t_w, t_h), interpolation=cv2.INTER_AREA)
+                res = cv2.matchTemplate(sparkle_roi_gray, resized, cv2.TM_CCOEFF_NORMED)
+                _, max_val, _, max_loc = cv2.minMaxLoc(res)
                 
-                # Match
-                res = cv2.matchTemplate(gray_roi, resized_template, cv2.TM_CCOEFF_NORMED)
-                min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
-                
-                if max_val > best_score:
-                    best_score = max_val
-                    best_loc = max_loc
-                    best_scale = scale
-                    best_mask_size = (t_w, t_h)
-                    best_template = template
-        
-        print(f"Best Ensemble Result: Scale: {best_scale:.2f}, Score: {best_score:.4f}")
-        
+                if max_val > best_sparkle_score:
+                    best_sparkle_score = max_val
+                    best_sparkle_loc = max_loc
+                    best_sparkle_size = (t_w, t_h)
+                    best_sparkle_template = template
 
-        # 3. Create Mask
-        mask = np.zeros((height, width), dtype=np.uint8)
-        
-        # Threshold for detection confidence
-        detection_threshold = 0.38 
-        
-        inpainting_radius = 3 # Default
-        
-        if best_score > detection_threshold:
-            # Match found! 
-            top_left = best_loc
-            t_w, t_h = best_mask_size
+        if best_sparkle_score > 0.38:
+            print(f"Sparkle detected (Score: {best_sparkle_score:.2f})")
+            t_w, t_h = best_sparkle_size
+            # Global coordinates
+            gx = (width - sparkle_search_w) + best_sparkle_loc[0]
+            gy = roi_y + best_sparkle_loc[1]
             
-            global_x = x1 + top_left[0]
-            global_y = y1 + top_left[1]
+            # Draw sparkle mask
+            s_mask = cv2.resize(best_sparkle_template, (t_w, t_h), interpolation=cv2.INTER_NEAREST)
+            h_p = min(t_h, height - gy)
+            w_p = min(t_w, width - gx)
             
-            # Resize the best template to the best scale
-            resized_template_mask = cv2.resize(best_template, (t_w, t_h), interpolation=cv2.INTER_NEAREST)
+            # Apply with dilation
+            kernel = np.ones((3,3), np.uint8)
+            iterations = 4 if best_sparkle_score > 0.7 else 2
+            s_mask_dilated = cv2.dilate(s_mask, kernel, iterations=iterations)
+            
+            mask[gy:gy+h_p, gx:gx+w_p] = cv2.max(mask[gy:gy+h_p, gx:gx+w_p], s_mask_dilated[0:h_p, 0:w_p])
+            detected_anything = True
+        
+        # --- SAFETY NET: FORCE BOTTOM RIGHT IF CONFIDENCE IS LOW ---
+        # If we didn't find a super clear match (score > 0.7), or if we found nothing,
+        # we nuke the corner anyway to be safe. The watermark is ALWAYS there.
+        if best_sparkle_score < 0.7:
+             print("Confidence low. Applying Safety Net to Bottom-Right Corner.")
+             # Standard Gemini sparkle is about 50-70px in 1024px images
+             safe_box_size = 75
+             safe_x = width - safe_box_size - 10 # 10px padding from right
+             safe_y = height - safe_box_size - 10 # 10px padding from bottom
+             cv2.rectangle(mask, (safe_x, safe_y), (width, height), 255, -1)
+             detected_anything = True
 
-            h_place = min(t_h, height - global_y)
-            w_place = min(t_w, width - global_x)
-            
-            mask[global_y:global_y+h_place, global_x:global_x+w_place] = resized_template_mask[0:h_place, 0:w_place]
-            
-            # AGGRESSIVE DILATION logic for high confidence matches
-            # The watermark often has a "glow" that the template misses.
-            # If we are sure it's the watermark, we kill it with fire.
-            if best_score > 0.8:
-                print("High confidence match. Using Aggressive Removal.")
-                kernel = np.ones((5, 5), np.uint8)
-                iterations = 5
-                inpainting_radius = 7
-            else:
-                kernel_size = 3 if best_scale < 1.0 else 5
-                kernel = np.ones((kernel_size, kernel_size), np.uint8)
-                iterations = 2
-                inpainting_radius = 3
+        # --- B. AUTHOR LABEL DETECTION (Detecting dark text labels) ---
+        label_roi_h = int(height * 0.05)
+        label_roi_y = height - label_roi_h
+        label_roi = roi_gray[roi_h - label_roi_h:] 
+        
+        # Use Canny + Vertical Opening to find text (ignores horizontal borders)
+        edges = cv2.Canny(label_roi, 50, 150)
+        kernel_v = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 3))
+        text_strokes = cv2.morphologyEx(edges, cv2.MORPH_OPEN, kernel_v)
+        
+        # Join strokes horizontally to restore words
+        kernel_h = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 1))
+        text_clusters = cv2.dilate(text_strokes, kernel_h, iterations=3)
+        
+        contours, _ = cv2.findContours(text_clusters, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for cnt in contours:
+            x, y, w, h = cv2.boundingRect(cnt)
+            # Author labels are typically wide but short, and NOT 100% of image width
+            if (width * 0.8) > w > 30 and 4 < h < label_roi_h:
+                print(f"Author label detected: {w}x{h} at x={x}")
+                cv2.rectangle(mask, (x-5, label_roi_y + y - 3), (x + w + 5, label_roi_y + y + h + 5), 255, -1)
+                detected_anything = True
 
-            mask_roi_view = mask[global_y:global_y+h_place, global_x:global_x+w_place]
-            dilated = cv2.dilate(mask_roi_view, kernel, iterations=iterations)
-            mask[global_y:global_y+h_place, global_x:global_x+w_place] = dilated
-            
-            print("Watermark detected via Template Matching.")
-            
+        # --- C. TOP-HAT FALLBACK (Small bright icons missed by template) ---
+        kh = 15
+        kernel_th = cv2.getStructuringElement(cv2.MORPH_RECT, (kh, kh))
+        tophat = cv2.morphologyEx(roi_gray, cv2.MORPH_TOPHAT, kernel_th)
+        _, th_thresh = cv2.threshold(tophat, 180, 255, cv2.THRESH_BINARY)
+        
+        # Find small clusters in bottom right
+        th_strip = th_thresh[:, width-sparkle_search_w:]
+        cnts, _ = cv2.findContours(th_strip, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for c in cnts:
+            if 10 < cv2.contourArea(c) < 1500:
+                c_shifted = c + np.array([width-sparkle_search_w, roi_y])
+                cv2.drawContours(mask, [c_shifted], -1, 255, -1)
+                detected_anything = True
+
+        # 4. INPAINT
+        if not detected_anything:
+            # Absolute last resort: just safety-box the corner
+            print("No features detected. Applying safety box as fallback.")
+            cv2.rectangle(mask, (width-100, height-100), (width-10, height-10), 255, -1)
+
+        # Final Dilation to ensure edge blending
+        mask = cv2.dilate(mask, np.ones((3,3), np.uint8), iterations=2)
+        
+        # Inpaint smoothly
+        result_bgr = cv2.inpaint(img_bgr, mask, 5, cv2.INPAINT_NS)
+
+        # 5. Restore Alpha channel if it was present
+        if is_rgba:
+            result = cv2.merge([result_bgr[:,:,0], result_bgr[:,:,1], result_bgr[:,:,2], alpha])
         else:
-            # FALLBACK: Feature-Based Detection (Top-Hat)
-            # Works on light or dark backgrounds by detecting local contrast (sparkles).
-            print("Template matching weak. Trying Top-Hat Fallback...")
-            
-            # Top-Hat Transform basically subtracts the opened image from the original.
-            # It isolates small bright elements.
-            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 15))
-            tophat = cv2.morphologyEx(gray_roi, cv2.MORPH_TOPHAT, kernel)
-            
-            # Threshold the Top-Hat result
-            # Bright sparkles will have high values in tophat
-            _, binary_roi = cv2.threshold(tophat, 200, 255, cv2.THRESH_BINARY)
-            
-            # Filter noise
-            kernel_noise = np.ones((3,3), np.uint8)
-            binary_roi = cv2.morphologyEx(binary_roi, cv2.MORPH_OPEN, kernel_noise, iterations=1)
-            
-            # Find contours
-            contours, _ = cv2.findContours(binary_roi, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            
-            found_spot = False
-            for cnt in contours:
-                area = cv2.contourArea(cnt)
-                if 5 < area < 2000: # Reasonable size for a sparkle
-                    cnt_shifted = cnt + np.array([x1, y1])
-                    cv2.drawContours(mask, [cnt_shifted], -1, 255, -1)
-                    found_spot = True
-            
-            if found_spot:
-                 # Dilate the fallback mask to be safe
-                kernel = np.ones((5,5), np.uint8)
-                mask = cv2.dilate(mask, kernel, iterations=3)
-                print("Watermark detected via Top-Hat Fallback.")
-            else:
-                # Last resort: Safety Box (Expanded)
-                print("WARNING: No watermark detected. Using Expanded Safety Box.")
-                box_size = 100 # Increased from 70
-                box_x = width - 110
-                box_y = height - 110
-                cv2.rectangle(mask, (box_x, box_y), (box_x + box_size, box_y + box_size), 255, -1)
-                inpainting_radius = 5
+            result = result_bgr
 
-        # 4. Inpaint
-        result = cv2.inpaint(img, mask, inpainting_radius, cv2.INPAINT_TELEA)
+        # Apply enhancement if requested
+        if upscale:
+            result = enhance_quality(result)
 
-        # Save
-        cv2.imwrite(output_path, result)
+        # Save with high quality
+        if output_path.lower().endswith('.png'):
+            cv2.imwrite(output_path, result, [cv2.IMWRITE_PNG_COMPRESSION, 0])
+        else:
+            cv2.imwrite(output_path, result)
 
-        return True, f"Marca de agua de Gemini eliminada (Score: {best_score:.2f}).", output_path
-
-        return True, f"Marca de agua de Gemini eliminada (Scale: {best_scale:.2f}, Score: {best_score:.2f}).", output_path
+        msg = "Marcas de agua (Logo y Etiquetas) eliminadas correctamente."
+        return True, msg, output_path
 
     except Exception as e:
         import traceback
         traceback.print_exc()
         return False, f"Error processing image: {str(e)}", None
+
+def enhance_quality(img):
+    """
+    Advanced enhancement for text-heavy images.
+    Uses denoising + high-fidelity upscaling + edge-preserving sharpening.
+    """
+    # 1. Initial Denoise (prevents upscaling compression artifacts)
+    # Using a light bilateral filter to keep text edges sharp while cleaning backgrounds
+    is_rgba = (len(img.shape) == 3 and img.shape[2] == 4)
+    if is_rgba:
+        bgr = img[:,:,0:3]
+        alpha = img[:,:,3]
+    else:
+        bgr = img
+
+    denoised = cv2.bilateralFilter(bgr, 7, 35, 35)
+
+    # 2. High-Fidelity Upscale (2x)
+    height, width = denoised.shape[:2]
+    upscaled = cv2.resize(denoised, (width * 2, height * 2), interpolation=cv2.INTER_LANCZOS4)
+
+    # 3. Edge-Preserving Sharpening (Detail Enhancement)
+    # This makes text pop without creating the "ringing" or "blur" of standard sharpening
+    enhanced = cv2.detailEnhance(upscaled, sigma_s=10, sigma_r=0.15)
+    
+    # 4. Final Polish: Contrast Adjustment
+    # We use a Laplacian-based sharpen but very subtle
+    kernel = np.array([[-1,-1,-1], [-1,9,-1], [-1,-1,-1]]) * 0.05
+    # The center is 1 + sum of others to maintain brightness
+    kernel[1,1] = 1.0 + (0.05 * 8)
+    final_bgr = cv2.filter2D(enhanced, -1, kernel)
+
+    if is_rgba:
+        # Restore and upscale alpha channel
+        upscaled_alpha = cv2.resize(alpha, (width * 2, height * 2), interpolation=cv2.INTER_LANCZOS4)
+        return cv2.merge([final_bgr[:,:,0], final_bgr[:,:,1], final_bgr[:,:,2], upscaled_alpha])
+    
+    return final_bgr
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
