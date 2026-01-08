@@ -35,17 +35,17 @@ Deploy a simple web application that allows users to upload NotebookLM documents
 ### Images (Gemini/Bard)
 - **Goal**: Preserve original image integrity while removing the logo.
 - **Watermark**: "Sparkle" logo in the bottom-right corner.
-- **Strategy: Template Matching (Advanced Recognizer)**:
-  - We use an ensemble of templates (sparkle logos) at multiple scales (0.7 to 1.3).
-  - This is robust to any background (snow, city, dark) because it detects the *shape* and not just the *brightness*.
+- **Strategy: Surgical Shape-Based Removal**:
+  - We use an ensemble of templates (including `v3` for high-fidelity) at multiple scales.
+  - **Surgical Anchoring (Primary/Fallback)**: Since Gemini watermarks have a fixed position (~94.5% Width, ~94.5% Height), we use a high-precision binary shape mask centered at this exact coordinate.
+  - This is robust to any background (snow, city, dark) and perfectly preserves transparency and surrounding textures.
 - **Inpainting**:
-  - Once detected, we use Navier-Stokes (NS) inpainting for a smoother blend.
+  - We use Navier-Stokes (NS) inpainting limited strictly to the sparkle pixels to ensure a seamless blend.
 - **Resolution Policy**: 
   - **Original Quality (Fixed)**: We explicitly avoid upscaling or artificial sharpening filters. 
-  - The tool outputs the exact same dimensions and byte-fidelity as the input to avoid "blurry" or "AI-distorted" artifacts in text or textures.
-- **Fallback**: 
-  - If shape matching fails, we use a **Top-Hat Transform** (local contrast detector) as a secondary layer.
-  - Final resort: known safety bounding box.
+  - The tool outputs the exact same dimensions and byte-fidelity as the input.
+- **Author Label Detection**:
+  - Uses Canny edge detection + morphological clusters to isolate and surgically remove photographer/credit text labels in the bottom margin.
 
 ## Technical Requirements
 - Clean, drop-zone UI.
