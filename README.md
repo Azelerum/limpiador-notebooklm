@@ -1,5 +1,7 @@
 # NotebookLM, Bard & Gemini Watermark Remover
 
+_URL para probarla: https://limpiador-notebooklm.onrender.com/_
+
 Una herramienta web premium para eliminar las marcas de agua de tus documentos (NotebookLM) y fotos generadas por IA (Bard, Gemini) de forma automática y fluida.
 
 He hecho una versión gratuita para que todo el mundo pueda usarla, pero si quieres que todo el mundo pueda usarla, puedes desplegarla en la nube (GitHub + Render).
